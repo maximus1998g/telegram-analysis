@@ -1,7 +1,6 @@
 import configparser
 import json
-import asyncio
-from datetime import date, datetime
+from datetime import datetime, timedelta
 
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
@@ -39,11 +38,12 @@ username = config['Telegram']['username']
 # Create the client and connect
 client = TelegramClient(username, api_id, api_hash)
 
+
 async def main(phone):
     await client.start()
     print("Client Created")
     # Ensure you're authorized
-    if await client.is_user_authorized() == False:
+    if await client.is_user_authorized() is False:
         await client.send_code_request(phone)
         try:
             await client.sign_in(phone, input('Enter the code: '))
@@ -67,8 +67,15 @@ async def main(phone):
     total_messages = 0
     total_count_limit = 0
 
+    users_ids = []
+
     while True:
         print("Current Offset ID is:", offset_id, "; Total Messages:", total_messages)
+
+        today = datetime.today()
+        first = today.replace(day=1)
+        last_month = first - timedelta(days=1)
+
         history = await client(GetHistoryRequest(
             peer=my_channel,
             offset_id=offset_id,
@@ -79,18 +86,34 @@ async def main(phone):
             min_id=0,
             hash=0
         ))
-        if not history.messages:
-            break
-        messages = history.messages
-        for message in messages:
-            all_messages.append(message.to_dict())
-        offset_id = messages[len(messages) - 1].id
-        total_messages = len(all_messages)
-        if total_count_limit != 0 and total_messages >= total_count_limit:
+        messages = list(filter(lambda x: datetime(year=x.date.year, month=x.date.month, day=x.date.day) > last_month, history.messages))
+
+        if not messages:
             break
 
-    with open('channel_messages.json', 'w') as outfile:
-        json.dump(all_messages, outfile, cls=DateTimeEncoder)
+        for message in messages:
+            all_messages.append(message.to_dict())
+            try:
+                user_id = message.from_id.user_id
+                if user_id not in users_ids:
+                    users_ids.append(user_id)
+            except AttributeError:
+                pass
+
+        offset_id = messages[len(messages) - 1].id
+        total_messages = len(all_messages)
+
+        if total_messages == 10000:  # total_count_limit != 0 and total_messages >= total_count_limit:
+            break
+
+    text_file = open('unique_users_ids_from_messages.txt', mode='wt', encoding='utf-8')
+    for user_id in users_ids:
+        text_file.write(str(user_id) + '\n')
+    text_file.close()
+
+    with open('channel_messages.json', 'w', encoding='utf-8') as outfile:
+        json.dump(all_messages, outfile, cls=DateTimeEncoder, ensure_ascii=False)
+
 
 with client:
     client.loop.run_until_complete(main(phone))
